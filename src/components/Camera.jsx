@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './Camera.css';
 
-const API_BASE = 'http://victorpi3.local:3001/api/camera';
+const API_BASE = '/api/camera';
 
 function Camera() {
   const [isStreaming, setIsStreaming] = useState(false);
@@ -22,6 +22,13 @@ function Camera() {
     };
   }, []);
 
+  useEffect(() => {
+    // Set image src when streaming starts
+    if (isStreaming && imgRef.current) {
+      imgRef.current.src = `${API_BASE}/stream?${Date.now()}`;
+    }
+  }, [isStreaming]);
+
   const fetchImages = async () => {
     try {
       const response = await fetch(`${API_BASE}/images`);
@@ -36,11 +43,6 @@ function Camera() {
     try {
       setCameraError(null);
       setIsStreaming(true);
-
-      // Set the image source to the stream endpoint
-      if (imgRef.current) {
-        imgRef.current.src = `${API_BASE}/stream?${Date.now()}`;
-      }
     } catch (error) {
       console.error('Error starting stream:', error);
       setCameraError('Unable to start camera stream.');
@@ -87,7 +89,7 @@ function Camera() {
 
   const downloadImage = (imageUrl, filename) => {
     const link = document.createElement('a');
-    link.href = `http://victorpi3.local:3001${imageUrl}`;
+    link.href = imageUrl;
     link.download = filename;
     link.target = '_blank';
     link.click();
@@ -125,6 +127,11 @@ function Camera() {
               ref={imgRef}
               alt="Pi Camera Stream"
               className="stream-image"
+              onError={(e) => {
+                console.error('Stream image failed to load:', e);
+                setCameraError('Failed to load camera stream. Please try again.');
+                setIsStreaming(false);
+              }}
             />
           ) : (
             <div className="camera-placeholder">
@@ -172,7 +179,7 @@ function Camera() {
             {capturedImages.map((image) => (
               <div key={image.filename} className="image-card">
                 <img
-                  src={`http://victorpi3.local:3001${image.url}`}
+                  src={image.url}
                   alt={image.filename}
                   loading="lazy"
                 />

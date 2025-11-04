@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import RaspberryPiInfo from './components/RaspberryPiInfo'
 import Camera from './components/Camera'
+import SystemControl from './components/SystemControl'
 import './App.css'
 
 function App() {
@@ -28,11 +29,18 @@ function App() {
         >
           📷 Camera
         </button>
+        <button
+          className={`nav-btn ${activeTab === 'control' ? 'active' : ''}`}
+          onClick={() => setActiveTab('control')}
+        >
+          ⚙️ Sys Control
+        </button>
       </nav>
 
       <main className="app-main">
         {activeTab === 'dashboard' && <RaspberryPiInfo />}
         {activeTab === 'camera' && <Camera />}
+        {activeTab === 'control' && <SystemControl />}
       </main>
 
       <footer className="app-footer">

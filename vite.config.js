@@ -10,7 +10,20 @@ export default defineConfig({
     https: true,
     allowedHosts: [
       'victorpi3.local',
+      'victorpi5.local',
       '.local'
-    ]
+    ],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/images': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   }
 })

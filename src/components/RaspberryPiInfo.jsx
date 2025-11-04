@@ -24,7 +24,7 @@ function RaspberryPiInfo() {
 
   const fetchSystemInfo = async () => {
     try {
-      const response = await fetch('http://victorpi3.local:3001/api/system-info');
+      const response = await fetch('/api/system-info');
       const data = await response.json();
       setSystemInfo(data);
     } catch (error) {

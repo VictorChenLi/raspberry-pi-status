@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import cron from 'node-cron';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -26,6 +27,39 @@ if (!fs.existsSync(imagesDir)) {
 
 // Serve static images
 app.use('/images', express.static(imagesDir));
+
+// Detect camera type
+let cameraType = 'none';
+let cameraDevice = '/dev/video0';
+
+async function detectCamera() {
+  try {
+    // Try to list CSI cameras
+    const { stdout } = await execAsync('rpicam-still --list-cameras 2>&1');
+    if (!stdout.includes('No cameras available')) {
+      cameraType = 'csi';
+      console.log('📷 CSI Camera detected');
+      return;
+    }
+  } catch (e) {
+    // rpicam-still failed
+  }
+
+  // Check for USB camera
+  try {
+    if (fs.existsSync('/dev/video0')) {
+      cameraType = 'usb';
+      console.log('📷 USB Camera detected on /dev/video0');
+      return;
+    }
+  } catch (e) {
+    // No USB camera
+  }
+
+  console.log('⚠️  No camera detected');
+}
+
+detectCamera();
 
 // Get system information
 app.get('/api/system-info', async (req, res) => {
@@ -107,12 +141,24 @@ app.get('/api/system-info', async (req, res) => {
 // Take a photo
 app.post('/api/camera/photo', async (req, res) => {
   try {
+    if (cameraType === 'none') {
+      return res.status(500).json({
+        success: false,
+        error: 'No camera detected. Please connect a camera and restart the server.'
+      });
+    }
+
     const timestamp = Date.now();
     const filename = `photo_${timestamp}.jpg`;
     const filepath = path.join(imagesDir, filename);
 
-    // Capture photo using rpicam-still
-    await execAsync(`rpicam-still -o ${filepath} --width 1920 --height 1080 --timeout 1 --nopreview`);
+    if (cameraType === 'csi') {
+      // Capture photo using rpicam-still for CSI camera
+      await execAsync(`rpicam-still -o ${filepath} --width 1920 --height 1080 --timeout 1 --nopreview`);
+    } else if (cameraType === 'usb') {
+      // Capture photo using ffmpeg for USB camera with MJPEG format
+      await execAsync(`ffmpeg -f v4l2 -input_format mjpeg -video_size 1920x1080 -i ${cameraDevice} -frames:v 1 -update 1 -y ${filepath} 2>&1`);
+    }
 
     res.json({
       success: true,
@@ -161,6 +207,10 @@ app.get('/api/camera/stream/stop', (req, res) => {
 // MJPEG stream endpoint
 app.get('/api/camera/stream', async (req, res) => {
   try {
+    if (cameraType === 'none') {
+      return res.status(500).json({ error: 'No camera detected' });
+    }
+
     res.writeHead(200, {
       'Content-Type': 'multipart/x-mixed-replace; boundary=FRAME',
       'Cache-Control': 'no-cache',
@@ -173,7 +223,12 @@ app.get('/api/camera/stream', async (req, res) => {
     // Continuously capture images
     const captureFrame = async () => {
       try {
-        await execAsync(`rpicam-still -o ${streamFile} --width 1280 --height 720 --timeout 1 --nopreview`);
+        if (cameraType === 'csi') {
+          await execAsync(`rpicam-still -o ${streamFile} --width 1280 --height 720 --timeout 1 --nopreview`);
+        } else if (cameraType === 'usb') {
+          // Use MJPEG format for faster capture
+          await execAsync(`ffmpeg -f v4l2 -input_format mjpeg -video_size 640x480 -i ${cameraDevice} -frames:v 1 -update 1 -y ${streamFile} 2>&1`);
+        }
 
         if (fs.existsSync(streamFile)) {
           const imageData = fs.readFileSync(streamFile);
@@ -240,6 +295,256 @@ app.delete('/api/camera/images/:filename', (req, res) => {
   } catch (error) {
     console.error('Error deleting image:', error);
     res.status(500).json({ error: 'Failed to delete image' });
+  }
+});
+
+// ============================================
+// SYSTEM CONTROL ENDPOINTS
+// ============================================
+
+// Storage for shutdown schedules
+const schedulesFile = path.join(__dirname, 'schedules.json');
+let shutdownSchedules = [];
+const activeCronJobs = new Map();
+
+// Load schedules from file
+function loadSchedules() {
+  try {
+    if (fs.existsSync(schedulesFile)) {
+      const data = fs.readFileSync(schedulesFile, 'utf8');
+      shutdownSchedules = JSON.parse(data);
+      console.log(`📅 Loaded ${shutdownSchedules.length} shutdown schedules`);
+
+      // Restart all enabled cron jobs
+      shutdownSchedules.forEach(schedule => {
+        if (schedule.enabled) {
+          startCronJob(schedule);
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error loading schedules:', error);
+    shutdownSchedules = [];
+  }
+}
+
+// Save schedules to file
+function saveSchedules() {
+  try {
+    fs.writeFileSync(schedulesFile, JSON.stringify(shutdownSchedules, null, 2));
+  } catch (error) {
+    console.error('Error saving schedules:', error);
+  }
+}
+
+// Convert time and days to cron expression
+function toCronExpression(time, days) {
+  const [hours, minutes] = time.split(':');
+  const daysStr = days.sort().join(',');
+  return `${minutes} ${hours} * * ${daysStr}`;
+}
+
+// Start a cron job for a schedule
+function startCronJob(schedule) {
+  try {
+    const cronExpression = toCronExpression(schedule.time, schedule.days);
+
+    if (activeCronJobs.has(schedule.id)) {
+      // Stop existing job first
+      activeCronJobs.get(schedule.id).stop();
+    }
+
+    const job = cron.schedule(cronExpression, async () => {
+      console.log(`⏰ Scheduled shutdown triggered: ${schedule.id} at ${schedule.time}`);
+      try {
+        await execAsync('sudo shutdown -h now');
+      } catch (error) {
+        console.error('Error during scheduled shutdown:', error);
+      }
+    });
+
+    activeCronJobs.set(schedule.id, job);
+    console.log(`✓ Started cron job for schedule ${schedule.id}: ${cronExpression}`);
+  } catch (error) {
+    console.error(`Error starting cron job for schedule ${schedule.id}:`, error);
+  }
+}
+
+// Stop a cron job for a schedule
+function stopCronJob(scheduleId) {
+  if (activeCronJobs.has(scheduleId)) {
+    activeCronJobs.get(scheduleId).stop();
+    activeCronJobs.delete(scheduleId);
+    console.log(`✓ Stopped cron job for schedule ${scheduleId}`);
+  }
+}
+
+// Initialize schedules on startup
+loadSchedules();
+
+// Get all schedules
+app.get('/api/system/schedules', (req, res) => {
+  res.json({ schedules: shutdownSchedules });
+});
+
+// Add a new schedule
+app.post('/api/system/schedules', (req, res) => {
+  try {
+    const { time, days, enabled = true } = req.body;
+
+    if (!time || !days || days.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Time and days are required'
+      });
+    }
+
+    const newSchedule = {
+      id: Date.now().toString(),
+      time,
+      days,
+      enabled,
+      created: new Date().toISOString()
+    };
+
+    shutdownSchedules.push(newSchedule);
+    saveSchedules();
+
+    if (enabled) {
+      startCronJob(newSchedule);
+    }
+
+    res.json({
+      success: true,
+      schedule: newSchedule
+    });
+
+    console.log(`✓ Added new shutdown schedule: ${time} on days ${days.join(',')}`);
+  } catch (error) {
+    console.error('Error adding schedule:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add schedule'
+    });
+  }
+});
+
+// Update a schedule (enable/disable)
+app.patch('/api/system/schedules/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { enabled } = req.body;
+
+    const schedule = shutdownSchedules.find(s => s.id === id);
+
+    if (!schedule) {
+      return res.status(404).json({
+        success: false,
+        error: 'Schedule not found'
+      });
+    }
+
+    schedule.enabled = enabled;
+    saveSchedules();
+
+    if (enabled) {
+      startCronJob(schedule);
+    } else {
+      stopCronJob(id);
+    }
+
+    res.json({ success: true, schedule });
+
+    console.log(`✓ ${enabled ? 'Enabled' : 'Disabled'} schedule ${id}`);
+  } catch (error) {
+    console.error('Error updating schedule:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update schedule'
+    });
+  }
+});
+
+// Delete a schedule
+app.delete('/api/system/schedules/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const index = shutdownSchedules.findIndex(s => s.id === id);
+
+    if (index === -1) {
+      return res.status(404).json({
+        success: false,
+        error: 'Schedule not found'
+      });
+    }
+
+    shutdownSchedules.splice(index, 1);
+    saveSchedules();
+
+    stopCronJob(id);
+
+    res.json({ success: true });
+
+    console.log(`✓ Deleted schedule ${id}`);
+  } catch (error) {
+    console.error('Error deleting schedule:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete schedule'
+    });
+  }
+});
+
+// Immediate shutdown
+app.post('/api/system/shutdown', async (req, res) => {
+  try {
+    console.log('⚠️  Immediate shutdown requested');
+    res.json({
+      success: true,
+      message: 'System is shutting down...'
+    });
+
+    // Delay the actual shutdown to allow response to be sent
+    setTimeout(async () => {
+      try {
+        await execAsync('sudo shutdown -h now');
+      } catch (error) {
+        console.error('Error during shutdown:', error);
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error initiating shutdown:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate shutdown'
+    });
+  }
+});
+
+// Immediate reboot
+app.post('/api/system/reboot', async (req, res) => {
+  try {
+    console.log('⚠️  Immediate reboot requested');
+    res.json({
+      success: true,
+      message: 'System is rebooting...'
+    });
+
+    // Delay the actual reboot to allow response to be sent
+    setTimeout(async () => {
+      try {
+        await execAsync('sudo reboot');
+      } catch (error) {
+        console.error('Error during reboot:', error);
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error initiating reboot:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate reboot'
+    });
   }
 });
 
