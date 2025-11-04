@@ -1,0 +1,272 @@
+.camera-container {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.camera-container h2,
+.camera-container h3 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.camera-container h2 {
+  font-size: 28px;
+}
+
+.camera-container h3 {
+  font-size: 22px;
+}
+
+.camera-error {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  text-align: center;
+  border: 1px solid #ef9a9a;
+}
+
+.camera-view {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.video-container {
+  flex: 1;
+  min-width: 300px;
+  position: relative;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-container video.inactive {
+  display: none;
+}
+
+.camera-placeholder {
+  text-align: center;
+  color: #fff;
+}
+
+.placeholder-icon {
+  font-size: 64px;
+  margin-bottom: 10px;
+}
+
+.camera-placeholder p {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.captured-preview {
+  flex: 1;
+  min-width: 300px;
+  background: #f5f5f5;
+  border-radius: 12px;
+  padding: 15px;
+}
+
+.captured-preview h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #333;
+  text-align: center;
+}
+
+.captured-preview img {
+  width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 15px;
+}
+
+.image-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-capture {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color: white;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  color: white;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+  color: white;
+}
+
+.camera-info {
+  background: #e3f2fd;
+  padding: 15px;
+  border-radius: 8px;
+  border-left: 4px solid #2196f3;
+}
+
+.camera-info p {
+  margin: 8px 0;
+  color: #1565c0;
+}
+
+.camera-info strong {
+  font-weight: 600;
+}
+
+.stream-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captured-images {
+  margin-top: 40px;
+  padding: 20px;
+  background: #f5f5f5;
+  border-radius: 12px;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.image-card {
+  position: relative;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.image-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.image-card img {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+.image-actions {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.btn-small {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-small:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-small.btn-success {
+  background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+  color: white;
+}
+
+.btn-small.btn-danger {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  color: white;
+}
+
+@media (max-width: 768px) {
+  .camera-view {
+    flex-direction: column;
+  }
+
+  .camera-controls {
+    flex-direction: column;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .image-controls {
+    flex-direction: column;
+  }
+
+  .camera-container h2 {
+    font-size: 24px;
+  }
+
+  .images-grid {
+    grid-template-columns: 1fr;
+  }
+}
