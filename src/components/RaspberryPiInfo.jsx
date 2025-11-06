@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import './RaspberryPiInfo.css';
 
-function RaspberryPiInfo() {
+function RaspberryPiInfo({ hostname = 'Raspberry Pi' }) {
   const [systemInfo, setSystemInfo] = useState({
     cpuTemp: 'Loading...',
     cpuUsage: 'Loading...',
@@ -43,7 +43,7 @@ function RaspberryPiInfo() {
 
   return (
     <div className="rpi-info-container">
-      <h2>Raspberry Pi System Information</h2>
+      <h2>{hostname} System Information</h2>
       <div className="info-grid">
         <div className="info-card">
           <div className="info-icon">🌡️</div>

@@ -33,33 +33,124 @@ let cameraType = 'none';
 let cameraDevice = '/dev/video0';
 
 async function detectCamera() {
+  console.log('🔍 Detecting camera...');
+
+  // Method 1: Try rpicam-still --list-cameras for CSI camera
   try {
-    // Try to list CSI cameras
     const { stdout } = await execAsync('rpicam-still --list-cameras 2>&1');
     if (!stdout.includes('No cameras available')) {
       cameraType = 'csi';
-      console.log('📷 CSI Camera detected');
+      console.log('📷 CSI Camera detected (via rpicam-still)');
       return;
     }
   } catch (e) {
-    // rpicam-still failed
+    // rpicam-still not available or failed, try other methods
   }
 
-  // Check for USB camera
+  // Method 2: Check for camera hardware using v4l2-ctl
+  try {
+    if (fs.existsSync('/dev/video0')) {
+      const { stdout } = await execAsync('v4l2-ctl --device=/dev/video0 --all 2>&1');
+
+      // Check if it's a CSI camera by looking for specific hardware identifiers
+      const isBroadcomCamera = stdout.includes('bcm2835-codec') ||
+                               stdout.includes('bcm2835-isp') ||
+                               stdout.includes('mmal');
+
+      const isPiCamera = stdout.includes('unicam') ||
+                        stdout.includes('OV5647') ||
+                        stdout.includes('IMX219') ||
+                        stdout.includes('IMX477') ||
+                        stdout.includes('IMX708');
+
+      if (isBroadcomCamera || isPiCamera) {
+        cameraType = 'csi';
+        console.log('📷 CSI/Pi Camera detected (via v4l2-ctl)');
+        console.log(`   Camera info: ${stdout.split('\n')[0]}`);
+        return;
+      } else {
+        cameraType = 'usb';
+        console.log('📷 USB Camera detected on /dev/video0');
+        console.log(`   Camera info: ${stdout.split('\n')[0]}`);
+        return;
+      }
+    }
+  } catch (e) {
+    console.log('⚠️  v4l2-ctl check failed:', e.message);
+  }
+
+  // Method 3: Check for CSI camera in /proc/device-tree
+  try {
+    const deviceTreePath = '/proc/device-tree/soc/i2c0mux/i2c@1/ov5647@36';
+    const altDeviceTreePath = '/proc/device-tree/soc/csi1/port';
+
+    if (fs.existsSync(deviceTreePath) || fs.existsSync(altDeviceTreePath)) {
+      cameraType = 'csi';
+      console.log('📷 CSI Camera detected (via device tree)');
+      if (!fs.existsSync('/dev/video0')) {
+        console.log('⚠️  CSI camera detected but /dev/video0 not found. Camera may need configuration.');
+      }
+      return;
+    }
+  } catch (e) {
+    // Device tree check failed
+  }
+
+  // Method 4: Try libcamera-still as fallback for CSI
+  try {
+    const { stdout, stderr } = await execAsync('libcamera-still --list-cameras 2>&1');
+    const output = stdout + stderr;
+    if (!output.includes('No cameras available')) {
+      cameraType = 'csi';
+      console.log('📷 CSI Camera detected (via libcamera-still)');
+      return;
+    }
+  } catch (e) {
+    // libcamera-still not available
+  }
+
+  // Method 5: Final fallback - check if /dev/video0 exists (assume USB)
   try {
     if (fs.existsSync('/dev/video0')) {
       cameraType = 'usb';
-      console.log('📷 USB Camera detected on /dev/video0');
+      console.log('📷 Camera detected on /dev/video0 (assuming USB camera)');
       return;
     }
   } catch (e) {
-    // No USB camera
+    // No video device
   }
 
   console.log('⚠️  No camera detected');
+  console.log('   Please ensure your camera is properly connected and configured.');
 }
 
 detectCamera();
+
+// Get camera information
+app.get('/api/camera/info', async (req, res) => {
+  try {
+    const info = {
+      type: cameraType,
+      device: cameraDevice,
+      available: cameraType !== 'none'
+    };
+
+    // Try to get additional info for detected cameras
+    if (cameraType !== 'none' && fs.existsSync('/dev/video0')) {
+      try {
+        const { stdout } = await execAsync('v4l2-ctl --device=/dev/video0 --info 2>&1');
+        info.details = stdout.split('\n').slice(0, 5).join('\n');
+      } catch (e) {
+        // v4l2-ctl not available
+      }
+    }
+
+    res.json(info);
+  } catch (error) {
+    console.error('Error getting camera info:', error);
+    res.status(500).json({ error: 'Failed to get camera information' });
+  }
+});
 
 // Get system information
 app.get('/api/system-info', async (req, res) => {
@@ -214,48 +305,81 @@ app.get('/api/camera/stream', async (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'multipart/x-mixed-replace; boundary=FRAME',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
     });
 
-    // Create a temporary file for streaming
-    const streamFile = path.join(imagesDir, 'stream.jpg');
+    let streamProcess = null;
+    let cleanup = false;
 
-    // Continuously capture images
-    const captureFrame = async () => {
-      try {
-        if (cameraType === 'csi') {
-          await execAsync(`rpicam-still -o ${streamFile} --width 1280 --height 720 --timeout 1 --nopreview`);
-        } else if (cameraType === 'usb') {
-          // Use MJPEG format for faster capture
-          await execAsync(`ffmpeg -f v4l2 -input_format mjpeg -video_size 640x480 -i ${cameraDevice} -frames:v 1 -update 1 -y ${streamFile} 2>&1`);
-        }
-
-        if (fs.existsSync(streamFile)) {
-          const imageData = fs.readFileSync(streamFile);
-          res.write(`--FRAME\r\n`);
-          res.write(`Content-Type: image/jpeg\r\n`);
-          res.write(`Content-Length: ${imageData.length}\r\n\r\n`);
-          res.write(imageData);
-          res.write('\r\n');
-        }
-
-        // Capture next frame after a short delay
-        if (!res.writableEnded) {
-          setTimeout(captureFrame, 100); // ~10 fps
-        }
-      } catch (error) {
-        if (!res.writableEnded) {
-          console.error('Error capturing frame:', error);
-          setTimeout(captureFrame, 500); // Retry after delay
-        }
+    // Cleanup function
+    const cleanupStream = () => {
+      cleanup = true;
+      if (streamProcess) {
+        streamProcess.kill('SIGTERM');
+        streamProcess = null;
       }
     };
 
-    captureFrame();
-
     req.on('close', () => {
       console.log('Stream closed by client');
+      cleanupStream();
     });
+
+    // Use frame-by-frame capture for both camera types
+    // This is more reliable than trying to parse continuous MJPEG streams
+    startFrameCapture();
+
+    // Frame-by-frame capture method
+    function startFrameCapture() {
+      const streamFile = path.join(imagesDir, 'stream.jpg');
+
+      const captureFrame = async () => {
+        if (cleanup || res.writableEnded) return;
+
+        try {
+          if (cameraType === 'csi') {
+            // Use rpicam-still with minimal timeout for faster capture
+            await execAsync(`rpicam-still -o ${streamFile} --width 640 --height 480 --timeout 1 --nopreview 2>&1`, {
+              timeout: 3000  // 3 second timeout
+            });
+          } else if (cameraType === 'usb') {
+            // Try MJPEG format first for faster capture
+            try {
+              await execAsync(`ffmpeg -f v4l2 -input_format mjpeg -video_size 640x480 -i ${cameraDevice} -frames:v 1 -update 1 -y ${streamFile} 2>&1`, {
+                timeout: 3000
+              });
+            } catch (e) {
+              // Fallback to YUYV format
+              await execAsync(`ffmpeg -f v4l2 -video_size 640x480 -i ${cameraDevice} -frames:v 1 -update 1 -y ${streamFile} 2>&1`, {
+                timeout: 3000
+              });
+            }
+          }
+
+          if (fs.existsSync(streamFile) && !cleanup && !res.writableEnded) {
+            const imageData = fs.readFileSync(streamFile);
+            res.write(`--FRAME\r\n`);
+            res.write(`Content-Type: image/jpeg\r\n`);
+            res.write(`Content-Length: ${imageData.length}\r\n\r\n`);
+            res.write(imageData);
+            res.write('\r\n');
+          }
+
+          // Capture next frame immediately (command itself takes time)
+          if (!cleanup && !res.writableEnded) {
+            setImmediate(captureFrame); // Use setImmediate for next frame
+          }
+        } catch (error) {
+          if (!cleanup && !res.writableEnded) {
+            console.error('Error capturing frame:', error);
+            setTimeout(captureFrame, 1000); // Retry after delay on error
+          }
+        }
+      };
+
+      captureFrame();
+    }
 
   } catch (error) {
     console.error('Error streaming:', error);

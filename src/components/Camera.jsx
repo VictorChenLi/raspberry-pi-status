@@ -3,16 +3,18 @@ import './Camera.css';
 
 const API_BASE = '/api/camera';
 
-function Camera() {
+function Camera({ hostname = 'Raspberry Pi' }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedImages, setCapturedImages] = useState([]);
   const [cameraError, setCameraError] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraInfo, setCameraInfo] = useState(null);
   const imgRef = useRef(null);
 
   useEffect(() => {
-    // Load existing images on mount
+    // Load existing images and camera info on mount
     fetchImages();
+    fetchCameraInfo();
 
     return () => {
       // Cleanup: stop the stream when component unmounts
@@ -36,6 +38,19 @@ function Camera() {
       setCapturedImages(data.images || []);
     } catch (error) {
       console.error('Error fetching images:', error);
+    }
+  };
+
+  const fetchCameraInfo = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/info`);
+      const data = await response.json();
+      setCameraInfo(data);
+      if (!data.available) {
+        setCameraError('No camera detected. Please ensure your camera is connected and configured.');
+      }
+    } catch (error) {
+      console.error('Error fetching camera info:', error);
     }
   };
 
@@ -112,7 +127,7 @@ function Camera() {
 
   return (
     <div className="camera-container">
-      <h2>Raspberry Pi Camera</h2>
+      <h2>{hostname} Camera</h2>
 
       {cameraError && (
         <div className="camera-error">
@@ -164,12 +179,24 @@ function Camera() {
       </div>
 
       <div className="camera-info">
-        <p>
-          <strong>Note:</strong> This uses the Raspberry Pi camera module connected to your Pi.
-        </p>
-        <p>
-          <strong>Status:</strong> {isStreaming ? '🟢 Streaming' : '🔴 Not streaming'}
-        </p>
+        {cameraInfo && (
+          <>
+            <p>
+              <strong>Camera Type:</strong>{' '}
+              {cameraInfo.type === 'csi' ? '📹 CSI/Pi Camera' :
+               cameraInfo.type === 'usb' ? '📷 USB Camera' : '❌ Not detected'}
+              {cameraInfo.device && ` (${cameraInfo.device})`}
+            </p>
+            <p>
+              <strong>Status:</strong> {isStreaming ? '🟢 Streaming' : '🔴 Not streaming'}
+            </p>
+          </>
+        )}
+        {!cameraInfo && (
+          <p>
+            <strong>Note:</strong> Detecting camera...
+          </p>
+        )}
       </div>
 
       {capturedImages.length > 0 && (

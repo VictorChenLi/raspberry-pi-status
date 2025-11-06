@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import RaspberryPiInfo from './components/RaspberryPiInfo'
 import Camera from './components/Camera'
 import SystemControl from './components/SystemControl'
@@ -6,13 +6,33 @@ import './App.css'
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [hostname, setHostname] = useState('Raspberry Pi')
+
+  useEffect(() => {
+    // Fetch hostname from backend
+    const fetchHostname = async () => {
+      try {
+        const response = await fetch('/api/system-info');
+        const data = await response.json();
+        if (data.hostname) {
+          setHostname(data.hostname);
+          // Update document title
+          document.title = `${data.hostname} Dashboard`;
+        }
+      } catch (error) {
+        console.error('Error fetching hostname:', error);
+      }
+    };
+
+    fetchHostname();
+  }, []);
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-content">
-          <h1>🥧 Raspberry Pi Dashboard</h1>
-          <p>Monitor your Raspberry Pi and control the camera</p>
+          <h1>🥧 {hostname} Dashboard</h1>
+          <p>Monitor your {hostname} and control the camera</p>
         </div>
       </header>
 
@@ -38,13 +58,13 @@ function App() {
       </nav>
 
       <main className="app-main">
-        {activeTab === 'dashboard' && <RaspberryPiInfo />}
-        {activeTab === 'camera' && <Camera />}
-        {activeTab === 'control' && <SystemControl />}
+        {activeTab === 'dashboard' && <RaspberryPiInfo hostname={hostname} />}
+        {activeTab === 'camera' && <Camera hostname={hostname} />}
+        {activeTab === 'control' && <SystemControl hostname={hostname} />}
       </main>
 
       <footer className="app-footer">
-        <p>Raspberry Pi Web Dashboard - Built with React & Vite</p>
+        <p>{hostname} Web Dashboard - Built with React & Vite</p>
       </footer>
     </div>
   )

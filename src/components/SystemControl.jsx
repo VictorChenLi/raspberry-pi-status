@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import './SystemControl.css';
 
-function SystemControl() {
+function SystemControl({ hostname = 'Raspberry Pi' }) {
   const [schedules, setSchedules] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newSchedule, setNewSchedule] = useState({
@@ -130,7 +130,7 @@ function SystemControl() {
   };
 
   const handleShutdownNow = async () => {
-    if (!confirm('Are you sure you want to shutdown now? This will turn off your Raspberry Pi immediately.')) {
+    if (!confirm(`Are you sure you want to shutdown now? This will turn off your ${hostname} immediately.`)) {
       return;
     }
 
@@ -153,7 +153,7 @@ function SystemControl() {
   };
 
   const handleRebootNow = async () => {
-    if (!confirm('Are you sure you want to reboot now? This will restart your Raspberry Pi immediately.')) {
+    if (!confirm(`Are you sure you want to reboot now? This will restart your ${hostname} immediately.`)) {
       return;
     }
 
