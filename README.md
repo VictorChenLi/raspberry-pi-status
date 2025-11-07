@@ -5,21 +5,41 @@ A real-time web application for monitoring Raspberry Pi system status and camera
 ## Features
 
 - **Real-time System Monitoring**
-  - CPU usage percentage
+  - CPU usage percentage and temperature
   - Memory usage (used/total)
   - Disk usage (used/total/available)
-  - System temperature monitoring
+  - System uptime
+  - **Voltage monitoring** with automatic Pi model detection
+    - Supports Raspberry Pi 3, 4, and 5
+    - Model-specific voltage thresholds (Pi 5: 0.80V, Pi 3/4: 1.15V)
+    - Under-voltage detection and warnings
+    - Throttling status monitoring
   - Real-time updates every 2 seconds
 
-- **Live Camera Feed**
-  - MJPEG stream from Raspberry Pi camera
+- **System Control**
+  - **Scheduled shutdowns** with cron-based scheduling
+    - Set multiple shutdown schedules
+    - Configure specific times and days of the week
+    - Enable/disable schedules
+  - **Immediate system controls**
+    - Shutdown system remotely
+    - Reboot system remotely
+
+- **Camera Features**
+  - **Automatic camera detection**
+    - Supports both CSI (ribbon cable) cameras
+    - Supports USB webcams
+    - Auto-detects camera type on startup
+  - **Live camera stream** (MJPEG)
+  - **Photo capture** with timestamp
+  - **Image gallery** with deletion capability
   - Displays camera device information
-  - Automatic reconnection on stream failure
 
 - **Modern UI**
   - Responsive design
   - Clean and intuitive interface
   - Real-time data visualization
+  - Visual alerts for system issues
 
 ## Tech Stack
 
@@ -57,13 +77,36 @@ npm install
 
 ## Configuration
 
+### System Control Permissions
+
+For shutdown and reboot features to work, the application needs sudo permissions without password prompt. Add the following to your sudoers file:
+
+```bash
+sudo visudo
+```
+
+Add this line at the end (replace `pi` with your username):
+```
+pi ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/reboot
+```
+
+Or for all users in the sudo group:
+```
+%sudo ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/reboot
+```
+
 ### Camera Setup
 
-Make sure your Raspberry Pi camera is enabled:
+The application automatically detects both CSI (ribbon cable) and USB cameras. For CSI cameras, ensure it's enabled:
 ```bash
 sudo raspi-config
 # Navigate to Interface Options > Camera > Enable
 ```
+
+Supported camera commands:
+- `rpicam-still` (Raspberry Pi OS Bullseye and later)
+- `libcamera-still` (older alternative)
+- `ffmpeg` (for USB webcams)
 
 ### Server Configuration
 
@@ -76,9 +119,63 @@ const PORT = process.env.PORT || 3001;
 
 The Vite dev server runs on port `5173` and proxies API requests to the backend. Configuration is in `vite.config.js`.
 
+### Voltage Monitoring
+
+Voltage monitoring automatically detects your Pi model and uses the appropriate method:
+
+**Raspberry Pi 5:**
+- Monitors **power supply voltage** (what comes from your adapter)
+- Uses PMIC (Power Management IC) via `vcgencmd pmic_read_adc`
+- Shows the actual 5V rail (e.g., "5.06V")
+- Warning threshold: 4.75V - 5.25V (5V ± 5% spec)
+- This tells you if your power adapter is adequate
+
+**Raspberry Pi 3/4:**
+- Monitors **core voltage** (CPU internal voltage)
+- Uses traditional `vcgencmd measure_volts core`
+- Shows core voltage (typically ~1.2V)
+- Warning threshold: < 1.15V
+
+The system also monitors for under-voltage conditions and throttling using `vcgencmd get_throttled`.
+
+**Why different voltages?**
+Your Pi's power supply provides 5V, but modern CPUs don't run at 5V. The Pi has internal voltage regulators that convert 5V to lower voltages (3.3V, 1.8V, 0.87V) for different components. The Pi 5's PMIC allows us to monitor the actual power supply voltage, which is more useful for detecting power issues.
+
 ## Running the Application
 
-### Development Mode
+### Quick Start (Recommended)
+
+The easiest way to run both servers is using the included start script:
+
+**Foreground mode** (shows logs in terminal):
+```bash
+./start.sh
+# or
+./start.sh --foreground
+```
+
+**Background mode** (runs as daemon):
+```bash
+./start.sh --background
+```
+
+**Check status:**
+```bash
+./start.sh --status
+```
+
+**Stop servers:**
+```bash
+./start.sh --stop
+```
+
+The application will be available at:
+- **Frontend**: https://localhost:5173/
+- **Backend API**: http://localhost:3001
+
+### Manual Start
+
+If you prefer to run the servers manually:
 
 1. Start the backend server:
 ```bash
@@ -92,7 +189,33 @@ npm run dev
 
 3. Open your browser and navigate to:
 ```
-http://localhost:5173
+https://localhost:5173
+```
+
+### Systemd Service (Auto-start on boot)
+
+A systemd service file is included for automatic startup:
+
+1. Copy the service file to systemd directory:
+```bash
+mkdir -p ~/.config/systemd/user
+cp raspberry-pi-status.service ~/.config/systemd/user/
+```
+
+2. Edit the service file to update paths if needed:
+```bash
+nano ~/.config/systemd/user/raspberry-pi-status.service
+```
+
+3. Enable and start the service:
+```bash
+systemctl --user enable raspberry-pi-status.service
+systemctl --user start raspberry-pi-status.service
+```
+
+4. Check service status:
+```bash
+systemctl --user status raspberry-pi-status.service
 ```
 
 ### Production Build
@@ -102,7 +225,7 @@ http://localhost:5173
 npm run build
 ```
 
-2. The built files will be in the `dist` directory. You can serve them using any static file server or integrate with the Express backend.
+2. The built files will be in the `dist` directory and are automatically served by the Express backend at `http://localhost:3001`.
 
 ## Project Structure
 
@@ -129,36 +252,158 @@ raspberry-pi-status/
 
 ## API Endpoints
 
-### GET `/api/info`
+### System Information
 
-Returns real-time system information.
+#### GET `/api/system-info`
+
+Returns comprehensive real-time system information including voltage monitoring.
 
 **Response:**
 ```json
 {
-  "cpu": {
-    "usage": 25.5
-  },
-  "memory": {
-    "used": 1234567890,
-    "total": 4294967296
-  },
-  "disk": {
-    "used": 12345678900,
-    "available": 23456789000,
-    "total": 35802467900
-  },
-  "temperature": {
-    "main": 45.2
-  }
+  "cpuTemp": "57.1'C",
+  "cpuUsage": "25.0%",
+  "memoryUsage": "26.2%",
+  "diskSpace": "32% used",
+  "uptime": "20h 13m",
+  "hostname": "victorpi5",
+  "osVersion": "Raspberry Pi OS",
+  "piModel": "Raspberry Pi 5 Model B Rev 1.1",
+  "voltage": "0.8713V",
+  "voltageIssue": false,
+  "voltageWarning": null
 }
 ```
 
-### GET `/api/camera`
+### Camera Endpoints
+
+#### GET `/api/camera/info`
+
+Returns camera detection information.
+
+**Response:**
+```json
+{
+  "type": "usb",
+  "device": "/dev/video0",
+  "available": true,
+  "details": "..."
+}
+```
+
+#### POST `/api/camera/photo`
+
+Captures a photo from the camera.
+
+**Response:**
+```json
+{
+  "success": true,
+  "filename": "photo_1234567890.jpg",
+  "url": "/images/photo_1234567890.jpg",
+  "timestamp": 1234567890
+}
+```
+
+#### GET `/api/camera/stream`
 
 Returns MJPEG stream from the Raspberry Pi camera.
 
 **Response:** `multipart/x-mixed-replace` stream with JPEG frames
+
+#### GET `/api/camera/images`
+
+Lists all captured images.
+
+**Response:**
+```json
+{
+  "images": [
+    {
+      "filename": "photo_1234567890.jpg",
+      "url": "/images/photo_1234567890.jpg",
+      "timestamp": 1234567890
+    }
+  ]
+}
+```
+
+#### DELETE `/api/camera/images/:filename`
+
+Deletes a captured image.
+
+### System Control Endpoints
+
+#### GET `/api/system/schedules`
+
+Returns all shutdown schedules.
+
+**Response:**
+```json
+{
+  "schedules": [
+    {
+      "id": "1234567890",
+      "time": "23:00",
+      "days": [0, 1, 2, 3, 4],
+      "enabled": true,
+      "created": "2024-11-07T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+#### POST `/api/system/schedules`
+
+Creates a new shutdown schedule.
+
+**Request Body:**
+```json
+{
+  "time": "23:00",
+  "days": [0, 1, 2, 3, 4],
+  "enabled": true
+}
+```
+
+#### PATCH `/api/system/schedules/:id`
+
+Enables or disables a schedule.
+
+**Request Body:**
+```json
+{
+  "enabled": true
+}
+```
+
+#### DELETE `/api/system/schedules/:id`
+
+Deletes a shutdown schedule.
+
+#### POST `/api/system/shutdown`
+
+Initiates immediate system shutdown.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "System is shutting down..."
+}
+```
+
+#### POST `/api/system/reboot`
+
+Initiates immediate system reboot.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "System is rebooting..."
+}
+```
 
 ## Troubleshooting
 
@@ -192,15 +437,20 @@ lsof -ti:3001 | xargs kill -9
 
 ## Future Improvements
 
-- [ ] Add historical data charts
-- [ ] Implement user authentication
-- [ ] Add system controls (restart, shutdown)
+- [ ] Add historical data charts and graphs
+- [ ] Implement user authentication and access control
+- [x] ~~Add system controls (restart, shutdown)~~ ✓ Completed
+- [x] ~~Scheduled shutdown functionality~~ ✓ Completed
+- [x] ~~Voltage monitoring~~ ✓ Completed
+- [x] ~~Automatic camera detection~~ ✓ Completed
 - [ ] Support for multiple cameras
 - [ ] Docker containerization
 - [ ] Mobile app version
-- [ ] Temperature alerts and notifications
+- [ ] Email/notification alerts for system issues
 - [ ] Network traffic monitoring
-- [ ] Process monitoring
+- [ ] Process monitoring and management
+- [ ] GPIO pin control and monitoring
+- [ ] Custom dashboard widgets
 
 ## Contributing
 

@@ -15,6 +15,32 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3001;
 
+// Detect Raspberry Pi model for voltage monitoring
+let piModel = 'unknown';
+let coreVoltageThreshold = 1.15; // For Pi 3/4 core voltage monitoring
+
+async function detectPiModel() {
+  try {
+    const { stdout } = await execAsync('cat /proc/device-tree/model');
+    piModel = stdout.trim();
+    console.log(`🔍 Detected Pi model: ${piModel}`);
+
+    if (piModel.includes('Raspberry Pi 5')) {
+      // Pi 5 uses PMIC to read power supply voltage (5V)
+      // Acceptable range: 4.75V - 5.25V (5V ± 5%)
+      console.log(`⚡ Pi 5 detected: Will monitor power supply voltage (5V)`);
+    } else {
+      // Pi 3/4 monitors core voltage (~1.2V)
+      coreVoltageThreshold = 1.15;
+      console.log(`⚡ Pi 3/4 detected: Will monitor core voltage (threshold: ${coreVoltageThreshold}V)`);
+    }
+  } catch (e) {
+    console.log('⚠️  Could not detect Pi model, using default voltage monitoring');
+  }
+}
+
+detectPiModel();
+
 // Enable CORS for frontend
 app.use(cors());
 app.use(express.json());
@@ -223,18 +249,40 @@ app.get('/api/system-info', async (req, res) => {
     let voltageIssue = false;
     let voltageWarning = null;
     try {
-      // Get core voltage
-      const voltOutput = await execAsync('vcgencmd measure_volts core');
-      const voltMatch = voltOutput.stdout.match(/volt=([\d.]+)V/);
-      if (voltMatch) {
-        const voltValue = parseFloat(voltMatch[1]);
-        voltage = voltMatch[1] + 'V';
+      // For Pi 5, get power supply voltage from PMIC
+      // For Pi 3/4, use core voltage (they don't have PMIC)
+      if (piModel.includes('Raspberry Pi 5')) {
+        // Pi 5: Read external 5V power supply voltage
+        const pmicOutput = await execAsync('vcgencmd pmic_read_adc');
+        const voltMatch = pmicOutput.stdout.match(/EXT5V_V volt\(\d+\)=([\d.]+)V/);
+        if (voltMatch) {
+          const voltValue = parseFloat(voltMatch[1]);
+          voltage = voltMatch[1] + 'V';
 
-        // Check if voltage is too low (typical operating voltage is ~1.2V for core)
-        // For power supply, we also check throttling
-        if (voltValue < 1.15) {
-          voltageIssue = true;
-          voltageWarning = 'Low voltage detected';
+          // Check if power supply voltage is too low
+          // Raspberry Pi requires 5V ± 5% (4.75V - 5.25V)
+          if (voltValue < 4.75) {
+            voltageIssue = true;
+            voltageWarning = 'Power supply voltage too low! Use official 5V adapter';
+          } else if (voltValue > 5.25) {
+            voltageIssue = true;
+            voltageWarning = 'Power supply voltage too high!';
+          }
+        }
+      } else {
+        // Pi 3/4: Use core voltage (traditional method)
+        const voltOutput = await execAsync('vcgencmd measure_volts core');
+        const voltMatch = voltOutput.stdout.match(/volt=([\d.]+)V/);
+        if (voltMatch) {
+          const voltValue = parseFloat(voltMatch[1]);
+          voltage = voltMatch[1] + 'V';
+
+          // Check if core voltage is too low
+          // Pi 3/4: ~1.2V core voltage, threshold 1.15V
+          if (voltValue < coreVoltageThreshold) {
+            voltageIssue = true;
+            voltageWarning = 'Low voltage detected';
+          }
         }
       }
 
@@ -282,6 +330,7 @@ app.get('/api/system-info', async (req, res) => {
       uptime,
       hostname,
       osVersion,
+      piModel,
       voltage,
       voltageIssue,
       voltageWarning
