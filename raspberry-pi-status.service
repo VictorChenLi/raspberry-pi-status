@@ -1,0 +1,22 @@
+[Unit]
+Description=Raspberry Pi Status Monitor
+Documentation=https://github.com/VictorChenLi/raspberry-pi-status
+After=network.target
+
+[Service]
+Type=forking
+User=victor
+WorkingDirectory=/home/victor/Documents/raspberry-pi-status
+ExecStart=/bin/bash /home/victor/Documents/raspberry-pi-status/start.sh --background
+ExecStop=/bin/bash /home/victor/Documents/raspberry-pi-status/start.sh --stop
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=NODE_ENV=production
+Environment=PORT=3001
+
+[Install]
+WantedBy=multi-user.target

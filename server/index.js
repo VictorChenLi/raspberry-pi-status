@@ -28,6 +28,10 @@ if (!fs.existsSync(imagesDir)) {
 // Serve static images
 app.use('/images', express.static(imagesDir));
 
+// Serve built frontend files
+const distDir = path.join(__dirname, '..', 'dist');
+app.use(express.static(distDir));
+
 // Detect camera type
 let cameraType = 'none';
 let cameraDevice = '/dev/video0';
@@ -214,6 +218,62 @@ app.get('/api/system-info', async (req, res) => {
       console.error('Error getting OS version:', e);
     }
 
+    // Get voltage information
+    let voltage = 'N/A';
+    let voltageIssue = false;
+    let voltageWarning = null;
+    try {
+      // Get core voltage
+      const voltOutput = await execAsync('vcgencmd measure_volts core');
+      const voltMatch = voltOutput.stdout.match(/volt=([\d.]+)V/);
+      if (voltMatch) {
+        const voltValue = parseFloat(voltMatch[1]);
+        voltage = voltMatch[1] + 'V';
+
+        // Check if voltage is too low (typical operating voltage is ~1.2V for core)
+        // For power supply, we also check throttling
+        if (voltValue < 1.15) {
+          voltageIssue = true;
+          voltageWarning = 'Low voltage detected';
+        }
+      }
+
+      // Check for throttling (which includes under-voltage detection)
+      const throttledOutput = await execAsync('vcgencmd get_throttled');
+      const throttledMatch = throttledOutput.stdout.match(/throttled=(0x[0-9a-fA-F]+)/);
+      if (throttledMatch) {
+        const throttledValue = parseInt(throttledMatch[1], 16);
+
+        // Bit 0: Under-voltage detected
+        // Bit 1: Arm frequency capped
+        // Bit 2: Currently throttled
+        // Bit 3: Soft temperature limit active
+        // Bit 16: Under-voltage has occurred
+        // Bit 17: Arm frequency capping has occurred
+        // Bit 18: Throttling has occurred
+        // Bit 19: Soft temperature limit has occurred
+
+        const underVoltageNow = (throttledValue & 0x1) !== 0;
+        const underVoltageOccurred = (throttledValue & 0x10000) !== 0;
+        const throttledNow = (throttledValue & 0x4) !== 0;
+        const throttledOccurred = (throttledValue & 0x40000) !== 0;
+
+        if (underVoltageNow) {
+          voltageIssue = true;
+          voltageWarning = 'Under-voltage detected! Check power supply';
+        } else if (underVoltageOccurred && !voltageWarning) {
+          voltageIssue = true;
+          voltageWarning = 'Under-voltage occurred previously';
+        } else if (throttledNow && !voltageWarning) {
+          voltageWarning = 'System throttled (check power/temperature)';
+        } else if (throttledOccurred && !voltageWarning) {
+          voltageWarning = 'Throttling occurred previously';
+        }
+      }
+    } catch (e) {
+      console.error('Error getting voltage info:', e);
+    }
+
     res.json({
       cpuTemp,
       cpuUsage,
@@ -221,7 +281,10 @@ app.get('/api/system-info', async (req, res) => {
       diskSpace,
       uptime,
       hostname,
-      osVersion
+      osVersion,
+      voltage,
+      voltageIssue,
+      voltageWarning
     });
   } catch (error) {
     console.error('Error fetching system info:', error);
@@ -670,6 +733,11 @@ app.post('/api/system/reboot', async (req, res) => {
       error: 'Failed to initiate reboot'
     });
   }
+});
+
+// Serve index.html for all other routes (SPA fallback)
+app.use((req, res) => {
+  res.sendFile(path.join(distDir, 'index.html'));
 });
 
 app.listen(PORT, '0.0.0.0', () => {

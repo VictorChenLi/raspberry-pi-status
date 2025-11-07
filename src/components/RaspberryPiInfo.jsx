@@ -10,6 +10,9 @@ function RaspberryPiInfo({ hostname = 'Raspberry Pi' }) {
     uptime: 'Loading...',
     hostname: 'Loading...',
     osVersion: 'Loading...',
+    voltage: 'Loading...',
+    voltageIssue: false,
+    voltageWarning: null,
   });
 
   useEffect(() => {
@@ -90,6 +93,17 @@ function RaspberryPiInfo({ hostname = 'Raspberry Pi' }) {
           <div className="info-content">
             <div className="info-label">Hostname</div>
             <div className="info-value">{systemInfo.hostname}</div>
+          </div>
+        </div>
+
+        <div className={`info-card ${systemInfo.voltageIssue ? 'voltage-warning' : ''}`}>
+          <div className="info-icon">{systemInfo.voltageIssue ? '⚠️' : '🔋'}</div>
+          <div className="info-content">
+            <div className="info-label">Voltage</div>
+            <div className="info-value">{systemInfo.voltage}</div>
+            {systemInfo.voltageWarning && (
+              <div className="voltage-warning-text">{systemInfo.voltageWarning}</div>
+            )}
           </div>
         </div>
 
